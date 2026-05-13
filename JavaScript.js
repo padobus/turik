@@ -1,5 +1,5 @@
 // ==================== GITHUB SYNC CONFIG ====================
-const GITHUB_TOKEN = "ghp_YOUR_TOKEN_HERE"; // 🔴 ЗАМЕНИ НА СВОЙ TOKEN
+const GITHUB_TOKEN = "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"; // 🔴 ЗАМЕНИ НА СВОЙ TOKEN
 const GITHUB_OWNER = "padobus";
 const GITHUB_REPO = "turik";
 const GITHUB_FILE_PATH = "players-data.json";
