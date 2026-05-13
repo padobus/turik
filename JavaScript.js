@@ -730,8 +730,12 @@ function addPlayer(player) {
   updateAccessButton(accessButton, player);
   updateManageButton(manageButton, player);
 
-  const canGrant = canGrantRights(getCurrentPlayerByIp());
-  actions.hidden = !canGrant;
+  const currentPlayer = getCurrentPlayerByIp();
+  const isAdmin = isAdminPlayer(currentPlayer);
+  const canGrant = canGrantRights(currentPlayer);
+  
+  // Показываем кнопки только если текущий пользователь - администратор
+  actions.hidden = !isAdmin;
 
   accessButton.addEventListener("click", () => {
     if (!canGrantRights(getCurrentPlayerByIp())) {
