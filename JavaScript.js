@@ -1,3 +1,11 @@
+// ==================== GITHUB SYNC CONFIG ====================
+const GITHUB_TOKEN = "ghp_YOUR_TOKEN_HERE"; // 🔴 ЗАМЕНИ НА СВОЙ TOKEN
+const GITHUB_OWNER = "padobus";
+const GITHUB_REPO = "turik";
+const GITHUB_FILE_PATH = "players-data.json";
+const SYNC_INTERVAL = 5000; // Синхронизация каждые 5 секунд
+
+// ==================== DOM ELEMENTS ====================
 const input = document.querySelector("#steamLink");
 const button = document.querySelector("#registerButton");
 const message = document.querySelector("#message");
@@ -9,13 +17,118 @@ const leaveTournamentButton = document.querySelector("#leaveTournamentButton");
 const bracketMessage = document.querySelector("#bracketMessage");
 const currentIpText = document.querySelector("#currentIpText");
 const playersControlList = document.querySelector("#playersControlList");
-const savedPlayers = JSON.parse(localStorage.getItem("players")) || [];
+
+// Начинаем с локального хранилища
+let savedPlayers = JSON.parse(localStorage.getItem("players")) || [];
 const adminSteamIds = new Set(["76561199205246483"]);
 
 let currentIp = "";
+let lastFileSha = null;
 
+// ==================== GITHUB API FUNCTIONS ====================
+async function loadPlayersFromGitHub() {
+  if (!GITHUB_TOKEN || GITHUB_TOKEN === "ghp_YOUR_TOKEN_HERE") {
+    console.warn("GitHub token не установлен. Используется локальное хранилище.");
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${GITHUB_FILE_PATH}`,
+      {
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+          Accept: "application/vnd.github.v3+raw",
+        },
+      }
+    );
+
+    if (!response.ok) {
+      console.warn("Файл не найден на GitHub, используется локальное хранилище.");
+      return;
+    }
+
+    const data = await response.json();
+    
+    if (data && data.content) {
+      const decoded = atob(data.content);
+      const players = JSON.parse(decoded);
+      
+      // Обновляем только если данные изменились
+      if (JSON.stringify(players) !== JSON.stringify(savedPlayers)) {
+        savedPlayers = players;
+        localStorage.setItem("players", JSON.stringify(savedPlayers));
+        renderRegistrationPlayersList();
+        fillProfileSelect();
+        updateProfileState();
+      }
+      
+      lastFileSha = data.sha;
+    }
+  } catch (error) {
+    console.error("Ошибка загрузки данных с GitHub:", error);
+  }
+}
+
+async function savePlayersToGitHub() {
+  if (!GITHUB_TOKEN || GITHUB_TOKEN === "ghp_YOUR_TOKEN_HERE") {
+    console.warn("GitHub token не установлен. Данные сохраняются только локально.");
+    return;
+  }
+
+  try {
+    const content = btoa(JSON.stringify(savedPlayers, null, 2));
+
+    // Сначала получаем текущий SHA файла
+    const getResponse = await fetch(
+      `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${GITHUB_FILE_PATH}`,
+      {
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+        },
+      }
+    );
+
+    let sha = null;
+    if (getResponse.ok) {
+      const data = await getResponse.json();
+      sha = data.sha;
+    }
+
+    // Теперь сохраняем файл
+    const response = await fetch(
+      `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${GITHUB_FILE_PATH}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: `Update players data - ${new Date().toISOString()}`,
+          content: content,
+          sha: sha,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      console.error("Ошибка сохранения на GitHub:", response.statusText);
+    }
+  } catch (error) {
+    console.error("Ошибка при синхронизации с GitHub:", error);
+  }
+}
+
+// ==================== INITIALIZATION ====================
 initRegistrationPage();
 initBracketPage();
+
+// Загружаем данные с GitHub при старте
+loadPlayersFromGitHub();
+
+// Периодическая синхронизация
+setInterval(loadPlayersFromGitHub, SYNC_INTERVAL);
 
 async function initRegistrationPage() {
   if (!button || !input || !message || !playersList) {
@@ -686,10 +799,15 @@ function updateManageButton(manageButton, player) {
 }
 
 function savePlayers() {
+  // Сохраняем локально
   localStorage.setItem("players", JSON.stringify(savedPlayers));
+  
+  // И в GitHub
+  savePlayersToGitHub();
 }
 
 function showMessage(text, isError = false) {
+  if (!message) return;
   message.textContent = text;
   message.style.color = isError ? "#ff5c5c" : "#00d18f";
 }
