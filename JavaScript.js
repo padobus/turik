@@ -1,9 +1,9 @@
 // ==================== GITHUB SYNC CONFIG ====================
-const GITHUB_TOKEN = "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"; // 🔴 ЗАМЕНИ НА СВОЙ TOKEN
+const GITHUB_TOKEN = "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";
 const GITHUB_OWNER = "padobus";
 const GITHUB_REPO = "turik";
 const GITHUB_FILE_PATH = "players-data.json";
-const SYNC_INTERVAL = 5000; // Синхронизация каждые 5 секунд
+const SYNC_INTERVAL = 3000; // Синхронизация каждые 3 секунды
 
 // ==================== DOM ELEMENTS ====================
 const input = document.querySelector("#steamLink");
@@ -18,8 +18,8 @@ const bracketMessage = document.querySelector("#bracketMessage");
 const currentIpText = document.querySelector("#currentIpText");
 const playersControlList = document.querySelector("#playersControlList");
 
-// Начинаем с локального хранилища
-let savedPlayers = JSON.parse(localStorage.getItem("players")) || [];
+// Данные игроков из GitHub
+let savedPlayers = [];
 const adminSteamIds = new Set(["76561199205246483"]);
 
 let currentIp = "";
@@ -27,43 +27,43 @@ let lastFileSha = null;
 
 // ==================== GITHUB API FUNCTIONS ====================
 async function loadPlayersFromGitHub() {
-  if (!GITHUB_TOKEN || GITHUB_TOKEN === "ghp_YOUR_TOKEN_HERE") {
-    console.warn("GitHub token не установлен. Используется локальное хранилище.");
-    return;
-  }
-
   try {
     const response = await fetch(
       `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${GITHUB_FILE_PATH}`,
       {
         headers: {
           Authorization: `token ${GITHUB_TOKEN}`,
-          Accept: "application/vnd.github.v3+raw",
+          Accept: "application/vnd.github.v3+json",
         },
       }
     );
 
     if (!response.ok) {
-      console.warn("Файл не найден на GitHub, используется локальное хранилище.");
+      console.warn("Файл не найден на GitHub");
       return;
     }
 
     const data = await response.json();
     
     if (data && data.content) {
-      const decoded = atob(data.content);
-      const players = JSON.parse(decoded);
-      
-      // Обновляем только если данные изменились
-      if (JSON.stringify(players) !== JSON.stringify(savedPlayers)) {
-        savedPlayers = players;
-        localStorage.setItem("players", JSON.stringify(savedPlayers));
-        renderRegistrationPlayersList();
-        fillProfileSelect();
-        updateProfileState();
+      try {
+        const decoded = atob(data.content);
+        const players = JSON.parse(decoded);
+        
+        // Обновляем только если данные изменились
+        if (JSON.stringify(players) !== JSON.stringify(savedPlayers)) {
+          savedPlayers = players;
+          console.log("Данные обновлены с GitHub");
+          renderRegistrationPlayersList();
+          fillProfileSelect();
+          updateProfileState();
+        }
+        
+        lastFileSha = data.sha;
+      } catch (e) {
+        console.error("Ошибка парсинга JSON:", e);
+        savedPlayers = [];
       }
-      
-      lastFileSha = data.sha;
     }
   } catch (error) {
     console.error("Ошибка загрузки данных с GitHub:", error);
@@ -71,11 +71,6 @@ async function loadPlayersFromGitHub() {
 }
 
 async function savePlayersToGitHub() {
-  if (!GITHUB_TOKEN || GITHUB_TOKEN === "ghp_YOUR_TOKEN_HERE") {
-    console.warn("GitHub token не установлен. Данные сохраняются только локально.");
-    return;
-  }
-
   try {
     const content = btoa(JSON.stringify(savedPlayers, null, 2));
 
@@ -114,6 +109,8 @@ async function savePlayersToGitHub() {
 
     if (!response.ok) {
       console.error("Ошибка сохранения на GitHub:", response.statusText);
+    } else {
+      console.log("Данные сохранены на GitHub");
     }
   } catch (error) {
     console.error("Ошибка при синхронизации с GitHub:", error);
@@ -134,8 +131,6 @@ async function initRegistrationPage() {
   if (!button || !input || !message || !playersList) {
     return;
   }
-
-  const registeredPlayers = new Set(savedPlayers.map((player) => player.id));
 
   applyAdminRights();
   currentIp = await getCurrentIp();
@@ -190,29 +185,24 @@ async function initRegistrationPage() {
     try {
       const player = await createPlayerFromSteamLink(profileUrl);
 
-      if (registeredPlayers.has(player.id)) {
-        showMessage("Этот игрок уже зарегистрирован", true);
-        return;
-      }
-
       player.canGenerate = isAdminPlayer(player);
       player.canManage = isAdminPlayer(player);
       player.ip = currentIp;
       player.registeredAt = new Date().toISOString();
 
-      registeredPlayers.add(player.id);
       savedPlayers.push(player);
-      savePlayers();
+      await savePlayers();
 
       renderRegistrationPlayersList();
       input.value = "";
 
       showMessage(
         player.loadedFromSteam
-          ? `Игрок зарегистрирован и привязан к IP ${currentIp}`
-          : `Игрок зарегистрирован по ссылке и привязан к IP ${currentIp}. Steam не отдал имя и аватар автоматически.`
+          ? `✅ Игрок ${player.name} зарегистрирован! IP: ${currentIp}`
+          : `✅ Игрок ${player.name} зарегистрирован по ссылке. IP: ${currentIp}`
       );
     } catch (error) {
+      console.error("Ошибка регистрации:", error);
       showMessage("Не удалось зарегистрировать профиль. Проверьте ссылку.", true);
     } finally {
       button.disabled = false;
@@ -273,12 +263,11 @@ function fillProfileSelect() {
 
   savedPlayers.forEach((player) => {
     const option = document.createElement("option");
-    const accessText = player.canGenerate ? "доступ есть" : "нет доступа";
-    const manageText = player.canManage ? "управление есть" : "без управления";
-    const ipText = player.ip ? `IP ${player.ip}` : "IP не привязан";
+    const accessText = player.canGenerate ? "✅ доступ" : "❌ нет";
+    const ipText = player.ip ? `${player.ip}` : "не привязан";
 
     option.value = player.id;
-    option.textContent = `${player.name} - ${accessText}, ${manageText}, ${ipText}`;
+    option.textContent = `${player.name} [${ipText}]`;
     profileSelect.append(option);
   });
 }
@@ -327,45 +316,49 @@ function updateProfileState() {
   const selectedPlayer = getCurrentPlayerByIp();
   const canGenerate = canGenerateBracket(selectedPlayer);
 
-  generateBracketButton.disabled = !canGenerate;
-  generateBracketButton.hidden = !canGenerate;
+  if (generateBracketButton) {
+    generateBracketButton.disabled = !canGenerate;
+    generateBracketButton.hidden = !canGenerate;
+  }
+  
   if (leaveTournamentButton) {
     leaveTournamentButton.disabled = !selectedPlayer;
     leaveTournamentButton.hidden = !selectedPlayer;
   }
-  bracketMessage.textContent = getSelectedProfileStatus(selectedPlayer);
+  
+  if (bracketMessage) {
+    bracketMessage.textContent = getSelectedProfileStatus(selectedPlayer);
+  }
+  
   renderPlayersControlList(selectedPlayer);
 }
 
 function getSelectedProfileStatus(player) {
   if (!currentIp) {
-    return "Не удалось определить ваш IP. Проверьте интернет и обновите страницу.";
+    return "⚠️ Не удалось определить ваш IP. Проверьте интернет и обновите страницу.";
   }
 
   if (!player) {
-    return `Для IP ${currentIp} не найден привязанный Steam аккаунт. Зарегистрируйтесь с этого устройства.`;
-  }
-  if (!player) {
-    return "Выберите профиль, которому выдали доступ.";
+    return `📱 Для IP ${currentIp} профиль не найден. Зарегистрируйтесь с этого устройства.`;
   }
 
   if (!isSameIp(player)) {
-    return "Текущий IP не совпадает с IP выбранного Steam профиля.";
+    return "❌ Текущий IP не совпадает с IP выбранного профиля.";
   }
 
   if (!player.canGenerate && !player.canManage) {
-    return "Профиль найден, но ему еще не выдали права.";
+    return "⏳ Профиль найден, но прав еще не выдано.";
   }
 
   if (player.canGenerate && player.canManage) {
-    return "Доступ к сетке и управление игроками подтверждены.";
+    return "✅ Полный доступ подтвержден!";
   }
 
   if (player.canGenerate) {
-    return "Доступ к сетке подтвержден.";
+    return "✅ Доступ к сетке подтвержден.";
   }
 
-  return "Управление игроками подтверждено.";
+  return "✅ Управление игроками подтверждено.";
 }
 
 function canGenerateBracket(player) {
@@ -471,8 +464,12 @@ function removePlayer(playerId, successMessage) {
   savePlayers();
   fillProfileSelect();
   updateProfileState();
-  bracket.textContent = "";
-  bracketMessage.textContent = successMessage;
+  if (bracket) {
+    bracket.textContent = "";
+  }
+  if (bracketMessage) {
+    bracketMessage.textContent = successMessage;
+  }
 }
 
 function getSelectedPlayer() {
@@ -483,7 +480,7 @@ function getCurrentPlayerByIp() {
   return savedPlayers.find((player) => isSameIp(player));
 }
 
-// Новая функция: поиск игрока по Steam ID
+// Новая функция: поиск игрока по Steam ID/URL
 function getPlayerBySteamId(profileUrl) {
   return savedPlayers.find((player) => {
     return player.url === profileUrl || player.id === profileUrl;
@@ -491,7 +488,7 @@ function getPlayerBySteamId(profileUrl) {
 }
 
 function isSameIp(player) {
-  return Boolean(player.ip && currentIp && player.ip === currentIp);
+  return Boolean(player && player.ip && currentIp && player.ip === currentIp);
 }
 
 async function getCurrentIp() {
@@ -507,11 +504,14 @@ async function getCurrentIp() {
     const data = await response.json();
     return typeof data.ip === "string" ? data.ip : "";
   } catch (error) {
+    console.error("Ошибка определения IP:", error);
     return "";
   }
 }
 
 function renderBracket() {
+  if (!bracket) return;
+  
   bracket.textContent = "";
 
   if (savedPlayers.length < 2) {
@@ -676,7 +676,7 @@ async function loadSteamProfile(profileUrl) {
         };
       }
     } catch (error) {
-      // Try the next proxy, then fall back to the link itself.
+      // Try the next proxy
     }
   }
 
@@ -716,6 +716,8 @@ function getXmlText(xml, tagName) {
 }
 
 function addPlayer(player) {
+  if (!playersList) return;
+  
   const listItem = document.createElement("li");
   const avatar = document.createElement("img");
   const playerInfo = document.createElement("div");
@@ -746,7 +748,6 @@ function addPlayer(player) {
 
   const currentPlayer = getCurrentPlayerByIp();
   const isAdmin = isAdminPlayer(currentPlayer);
-  const canGrant = canGrantRights(currentPlayer);
   
   // Показываем кнопки только если текущий пользователь - администратор
   actions.hidden = !isAdmin;
@@ -800,8 +801,8 @@ function renderRegistrationPlayersList() {
 
 function getPlayerMeta(player) {
   const ipText = player.ip || "не привязан";
-  const accessText = player.canGenerate ? "сетка: да" : "сетка: нет";
-  const manageText = player.canManage ? "кик: да" : "кик: нет";
+  const accessText = player.canGenerate ? "✅ сетка" : "❌ сетка";
+  const manageText = player.canManage ? "✅ кик" : "❌ кик";
 
   return `IP: ${ipText} | ${accessText} | ${manageText}`;
 }
@@ -816,12 +817,14 @@ function updateManageButton(manageButton, player) {
   manageButton.classList.toggle("access-button-active", Boolean(player.canManage));
 }
 
-function savePlayers() {
-  // Сохраняем локально
-  localStorage.setItem("players", JSON.stringify(savedPlayers));
+async function savePlayers() {
+  // Сохраняем в GitHub (основной источник данных)
+  await savePlayersToGitHub();
   
-  // И в GitHub
-  savePlayersToGitHub();
+  // Обновляем UI
+  renderRegistrationPlayersList();
+  fillProfileSelect();
+  updateProfileState();
 }
 
 function showMessage(text, isError = false) {
