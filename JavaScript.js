@@ -169,10 +169,17 @@ async function initRegistrationPage() {
       return;
     }
 
-    const playerWithSameIp = savedPlayers.find((player) => player.ip === currentIp);
+    // Проверяем есть ли уже этот Steam аккаунт
+    const existingPlayer = getPlayerBySteamId(profileUrl);
+    if (existingPlayer) {
+      showMessage(`Этот Steam аккаунт уже зарегистрирован как: ${existingPlayer.name}`, true);
+      return;
+    }
 
+    // Проверяем есть ли уже игрок с таким IP (но другой Steam ID)
+    const playerWithSameIp = savedPlayers.find((player) => player.ip === currentIp);
     if (playerWithSameIp) {
-      showMessage(`Этот IP уже привязан к Steam аккаунту: ${playerWithSameIp.name}`, true);
+      showMessage(`Этот IP уже привязан к Steam аккаунту: ${playerWithSameIp.name}. Выйдите из браузера на другом устройстве или используйте другой IP.`, true);
       return;
     }
 
@@ -474,6 +481,13 @@ function getSelectedPlayer() {
 
 function getCurrentPlayerByIp() {
   return savedPlayers.find((player) => isSameIp(player));
+}
+
+// Новая функция: поиск игрока по Steam ID
+function getPlayerBySteamId(profileUrl) {
+  return savedPlayers.find((player) => {
+    return player.url === profileUrl || player.id === profileUrl;
+  });
 }
 
 function isSameIp(player) {
